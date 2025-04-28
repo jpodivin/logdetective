@@ -18,6 +18,24 @@ jobs:
         run: >
           echo "${{ github.ref }}" | grep -q -P "^refs/tags/v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$"
           || exit 1
+      - name: Set TAG var
+        run:
+          TAG=$(echo ${{ github.ref }} | cut -d "/" -f 3)
+      - name: Bump version in pyproject.toml
+        run:
+          sed "s/version = ".*"/version = $TAG/" pyproject.toml
+      - name: Commit changes
+        uses: EndBug/add-and-commit@a94899bca583c204427a224a7af87c02f9b325d5
+        with:
+          default_author: github_actor
+          message: 'Bumping package version to ${{ env.TAG }}'
+          add: pyproject.toml
+          commit: --signoff
+          push: true
+      - name: Move tag
+        run: |
+          git tag -d $TAG
+          git tag $TAG HEAD
       - name: Install Poetry
         run: curl -sSL https://install.python-poetry.org | python -
       - name: Add Poetry to path

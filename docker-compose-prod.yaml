@@ -91,6 +91,14 @@ services:
       LOGDETECTIVE_SERVER_PORT: 443
     ports:
       - "443:443"
+  migrate:
+    extends:
+      file: docker-compose.yaml
+      service: migrate
+  worker:
+    extends:
+      file: docker-compose.yaml
+      service: worker
   postgres:
     extends:
       file: docker-compose.yaml

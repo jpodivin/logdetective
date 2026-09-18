@@ -1,7 +1,9 @@
 import datetime
 import re
 import subprocess as sp
-from typing import List, Dict, Optional, Any, Union, Sequence
+from typing import List, Dict, Optional, Any, Union, Sequence, Literal
+from uuid import UUID
+
 from pydantic import (
     BaseModel,
     RootModel,
@@ -12,6 +14,7 @@ from pydantic import (
     HttpUrl,
     ConfigDict,
     SecretStr,
+    UUID4,
 )
 
 from logdetective.constants import (
@@ -166,6 +169,10 @@ class AnalysisRequest(BaseModel):
     """Model of the request body for /analyze endpoint"""
 
     model_config = ConfigDict(hide_input_in_errors=True, extra="forbid")
+    id: UUID4 | None = Field(
+        default=None,
+        description="Optional client-generated public task id used for safe retries.",
+    )
     files: Sequence[Union[ArtifactFile, RemoteArtifactFile]] = Field(
         description="List of artifacts",
         min_length=1,
@@ -183,6 +190,17 @@ class AnalysisRequest(BaseModel):
         if len(names) != len(set(names)):
             raise ValueError("Duplicate filenames detected in 'files' list")
         return self
+
+
+class KojiAnalysisRequest(BaseModel):
+    """Request an analysis of a build from a configured Koji instance."""
+
+    model_config = ConfigDict(
+        hide_input_in_errors=True, extra="forbid", populate_by_name=True
+    )
+    id: UUID4 | None = None
+    koji_instance: str = Field(alias="kojiInstance", min_length=1)
+    task_id: int = Field(alias="taskId", gt=0)
 
 
 class JobHook(BaseModel):
@@ -290,6 +308,27 @@ class KojiResponse(BaseModel):
     task_id: int
     log_file_name: str
     response: APIResponse
+
+
+class TaskError(BaseModel):
+    """Safe public error information for an asynchronous task."""
+
+    code: str
+    message: str
+
+
+class TaskResponse(BaseModel):
+    """Stable response envelope used from admission through termination."""
+
+    model_config = ConfigDict(populate_by_name=True)
+    id: UUID
+    task_type: Literal["generic", "koji"] = Field(alias="taskType")
+    created_at: datetime.datetime = Field(alias="createdAt")
+    status: Literal[
+        "scheduled", "in_progress", "cancelling", "cancelled", "done", "error"
+    ]
+    error: TaskError | None = None
+    result: KojiResponse | APIResponse | None = None
 
 
 class InferenceConfig(BaseModel):  # pylint: disable=too-many-instance-attributes
@@ -469,6 +508,16 @@ class GeneralConfig(BaseModel):
         return (v if isinstance(v, int) else DEFAULT_MAXIMUM_ARTIFACT_MIB) * 1024**2
 
 
+class TaskQueueConfig(BaseModel):
+    """Log Detective policy layered over Procrastinate's worker mechanics."""
+
+    retry_after: int = Field(default=5, ge=1)
+    concurrency: int = Field(default=1, ge=1)
+    retention_days: int = Field(default=30, ge=1)
+    shutdown_graceful_timeout: float = Field(default=30, gt=0)
+    stalled_worker_timeout: float = Field(default=30, gt=0)
+
+
 class Config(BaseModel):
     """Model for configuration of logdetective server."""
 
@@ -479,6 +528,7 @@ class Config(BaseModel):
     gitlab: GitLabConfig = Field(default_factory=GitLabConfig)
     koji: KojiConfig = Field(default_factory=KojiConfig)
     general: GeneralConfig = Field(default_factory=GeneralConfig)
+    task_queue: TaskQueueConfig = Field(default_factory=TaskQueueConfig)
     prompts: PromptConfig = Field(default_factory=PromptConfig)
 
     @field_validator("prompts", mode="before")

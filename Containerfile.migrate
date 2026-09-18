@@ -1,0 +1,27 @@
+FROM fedora:42 AS dependencies
+
+RUN dnf install -y python3-pip && dnf clean all
+
+COPY ./requirements-migrate.txt /tmp/requirements-migrate.txt
+RUN pip3 install --no-cache-dir \
+    --target /opt/migration-dependencies \
+    -r /tmp/requirements-migrate.txt
+
+FROM fedora:42
+
+RUN dnf install -y python3 postgresql && dnf clean all
+
+COPY --from=dependencies /opt/migration-dependencies /opt/migration-dependencies
+ENV PYTHONPATH=/opt/migration-dependencies
+
+WORKDIR /src
+
+COPY ./logdetective/__init__.py /src/logdetective/__init__.py
+COPY ./logdetective/constants.py /src/logdetective/constants.py
+COPY ./logdetective/procrastinate_app.py /src/logdetective/procrastinate_app.py
+COPY ./logdetective/database/ /src/logdetective/database/
+COPY ./alembic.ini /src/alembic.ini
+COPY ./alembic/ /src/alembic/
+COPY ./scripts/migrate /src/scripts/migrate
+
+ENTRYPOINT ["/src/scripts/migrate"]

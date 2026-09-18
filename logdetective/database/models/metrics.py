@@ -15,12 +15,12 @@ from sqlalchemy import (
     extract,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from logdetective.database.base import Base, transaction
+from logdetective.database.base import Base, transaction, retry_database_error
 from logdetective.database.models.merge_request_jobs import (
     GitlabMergeRequestJobs,
 )
-from logdetective.utils import retry_database_error
 
 
 if TYPE_CHECKING:
@@ -71,7 +71,7 @@ class AnalyzeRequestMetrics(Base):
     response_sent_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True),
         nullable=True,
-        comment="Timestamp when the response was sent back",
+        comment="Timestamp when the endpoint response was ready",
     )
     response_length: Mapped[Optional[int]] = mapped_column(
         Integer, nullable=True, comment="Length of the response in chars"
@@ -99,6 +99,36 @@ class AnalyzeRequestMetrics(Base):
         "TaskAnalysis",
         back_populates="analysis_metrics",
     )
+
+    @classmethod
+    async def create_in_session(
+        cls,
+        session: AsyncSession,
+        endpoint: EndpointType,
+        request_received_at: datetime | None = None,
+        api_token_name: str | None = None,
+    ) -> AnalyzeRequestMetrics | None:
+        """Create metrics inside a caller-owned admission transaction.
+
+        Args:
+            session: Database session whose transaction owns task admission.
+            endpoint: API endpoint for which the request was accepted.
+            request_received_at: Optional request timestamp; current UTC time is used
+                when omitted.
+            api_token_name: Non-secret name of the token that authorized the request.
+
+        Returns:
+            The flushed metrics record, or ``None`` if the database did not assign
+            its primary key.
+        """
+        metrics = cls(
+            endpoint=endpoint,
+            request_received_at=request_received_at or datetime.now(timezone.utc),
+            api_token_name=api_token_name,
+        )
+        session.add(metrics)
+        await session.flush()
+        return metrics if metrics.id is not None else None
 
     @classmethod
     @retry_database_error

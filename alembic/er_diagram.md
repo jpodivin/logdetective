@@ -55,15 +55,25 @@ erDiagram
     }
 
     task_analysis {
-        integer attempt_count
-        character_varying external_task_id
+        timestamp_with_time_zone cancellation_requested_at
+        character_varying error_code
+        character_varying error_message
+        timestamp_with_time_zone expires_at
+        timestamp_with_time_zone finished_at
+        integer generation
         integer id PK
+        json input_payload
+        character_varying owner_token_name
+        bigint procrastinate_job_id UK
+        character_varying request_hash
         timestamp_with_time_zone request_received_at
+        integer request_size
         bytea response
         integer response_metrics_id FK
-        timestamp_with_time_zone response_returned_at
+        character_varying source_id
+        timestamp_with_time_zone started_at
         analysisstate state
-        uuid task_id
+        uuid task_id UK
         json task_metadata
         tasktype task_type
     }

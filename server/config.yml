@@ -62,16 +62,15 @@ extractor:
 #     webhook_secrets:
 #       - example_secret
 #     timeout: 6.0
-# koji:
-#   analysis_timeout: 15
-#   max_artifact_size: 50
+koji:
+  analysis_timeout: 15
+  max_artifact_size: 50
 
-#   # Koji instances
-#   instances:
-#     "fedora":
-#       xmlrpc_url: https://koji.fedoraproject.org/kojihub
-#       tokens:
-#         - example_token
+  # Koji instances
+  instances:
+    "fedora":
+      xmlrpc_url: https://koji.fedoraproject.org/kojihub
+
 general:
   max_artifact_size: 50  # in MiB
   packages:
@@ -91,6 +90,12 @@ general:
   # annotation_lookup_tool: true
   # Upper limit for returned similar annotated snippets
   # max_annotations: 3
+task_queue:
+  retry_after: 5
+  concurrency: 1
+  retention_days: 30
+  shutdown_graceful_timeout: 30
+  stalled_worker_timeout: 30
 # Configuration of the prompt manager:
 # Here, you can define optional references intended for customizing the system prompt.
 # Prompt jinja templates are stored in ./prompts directory

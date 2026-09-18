@@ -12,7 +12,7 @@ Production uses either vLLM with GPU inference, or Gemini / VertexAI.
 - Environment variables are in `env_file`; server config is in `server/config.yml`.
 - If running a local model, place a GGUF model file in `./models/` (path referenced by `LLAMA_ARG_MODEL` in `env_file`).
 - Local model needs a Jinja2 chat template at `./models/chat_template.jinja` for tool-call support.
-- If running a model from some provider, obtain appropriate credentials and set `provider_settings` in `server/config.yml`.
+- If running a model from a provider, set its credentials under `inference.provider_settings` in `server/config.yml`.
 
 # Setup
 
@@ -26,10 +26,11 @@ To install full superset of dependencies in a single resolution pass, use:
 Tox environments use two separate `poetry install` calls.
 Combined form is more stable for interactive development.
 Dev stack uses `docker-compose-dev.yaml` which extends the base `docker-compose.yaml`.
-DB migrations run automatically on server startup via `scripts/await_psql` + alembic.
+On a new database, the one-shot `migrate` service installs Procrastinate's pinned schema and then runs Alembic before API and worker services start. Procrastinate upgrades require its supplied SQL migrations; its 3.9 schema installer is not an idempotent upgrader.
+The migration service uses the minimal Fedora-based `Containerfile.migrate`; keep `requirements-migrate.txt` aligned with `poetry.lock`.
 For CUDA GPU acceleration, uncomment the device lines in `docker-compose-dev.yaml`.
 
-- `make server-up` builds and starts the dev stack (inference, server, postgres, nginx)
+- `make server-up` builds and starts the dev stack (inference, server, worker, postgres, nginx)
 - `make server-down` tears down dev stack
 - `make rebuild-server` rebuild server image without cache
 
@@ -41,8 +42,20 @@ For CUDA GPU acceleration, uncomment the device lines in `docker-compose-dev.yam
 # Data modeling conventions
 
 - Pydantic v2 for all request/response validation and config models (`BaseModel`, `Field`, `model_validator`, `field_validator`, `ConfigDict`)
-- SQLAlchemy 2.x async ORM with asyncpg driver for database models
+- SQLAlchemy 2.x async ORM with the psycopg 3 driver for database models
 - Alembic for DB migrations; autogenerate new ones with `CHANGE="description" make alembic-generate-revision`
+- Procrastinate owns only its `procrastinate_*` schema; do not copy its schema into Alembic revisions.
+
+# Asynchronous API convention
+
+- Every endpoint that starts non-trivial or long-running work must durably admit a Procrastinate job and its application record in one database transaction, then return `202` only after commit.
+- Return a stable task envelope and `Location` plus `Retry-After` headers. Polling uses `GET /tasks/{opaque_uuid}` and returns `200` in both active and terminal states.
+- Cancellation uses `DELETE /tasks/{opaque_uuid}` and application state is the durable cancellation authority. Never expose Procrastinate job IDs or tables through the public API.
+- Client UUIDs are idempotency keys. Identical retries return the same operation; conflicting reuse returns `409`.
+- Keep inputs, results, ownership, public state, retention, and fencing in the application model. Procrastinate owns scheduling, claiming, and worker heartbeats.
+- Analysis work runs directly in Procrastinate's async worker tasks. Blocking library calls are tracked and cancellation remains pending until they return. The API tier shares application configuration but must not invoke inference or outbound GitLab clients.
+- GitLab's external webhook remains `204`, but acknowledgement occurs only after durable queue admission. Koji uses the same task resource as generic analysis and has no callback endpoint.
+- Database operations belong on relevant model classmethods, must be type annotated, and every nullable database result must be checked explicitly.
 
 # Formatting conventions
 
@@ -58,7 +71,7 @@ For CUDA GPU acceleration, uncomment the device lines in `docker-compose-dev.yam
 
 # Package layout
 
-- `logdetective/` - FastAPI app, config, routes, GitLab/Koji integrations, extractors, prompt management, utilities
+- `logdetective/` - FastAPI app, Procrastinate worker/tasks, config, routes, GitLab/Koji integrations, extractors, prompt management, utilities
 - `logdetective/prompts/` - Prompt templates for logdetective
 - `logdetective/agent/` - BeeAI agent and tool definitions (Drain, csgrep, traceback, snippet analysis)
 - `logdetective/database/` - SQLAlchemy async engine, session factory, transaction helpers
